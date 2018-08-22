@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.IO;
+using System.Text;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -81,13 +82,38 @@ namespace OMO.SDK.Updater
                 Parser parser = new Parser();
                 Task[] tasks = parser.ParseJSON(manifest);
 				List<Task> taskList = new List<Task>();
-				taskList.AddRange(tasks);
+                foreach(Task task in tasks)
+                {
+                    if(!compareMD5(task))
+				        taskList.Add(task);
+                }
 				_onSuccess(taskList);
             }
             catch (System.Exception e)
             {
                 _onError(e.Message);
             }
+        }
+
+        private bool compareMD5(Task _task)
+        {
+            string filename = _task.file;
+            if(null != processor)
+            {
+                if(null != processor.Rename)
+                {
+                    filename = processor.Rename(_task.file);
+                }
+            }
+
+            // trim path:  /1/a -> 1/a
+            string outpath = Path.Combine(config.dir, _task.path.Remove(0,1));
+            string outfile = Path.Combine(outpath, filename)+".md5";
+            if(!File.Exists(outfile))
+                return false;
+
+            string md5 = File.ReadAllText(outfile);
+            return md5.Equals(_task.md5);
         }
     }//class
 }//namespace OMO.SDK.Updater
