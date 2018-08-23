@@ -71,7 +71,6 @@ namespace OMO.SDK.Updater
             yield return www;
             if (null != www.error)
             {
-				Debug.LogError(www.error);
                 _onError(www.error);
                 yield break;
             }
