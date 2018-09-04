@@ -83,8 +83,13 @@ namespace OMO.SDK.Updater
 				List<Task> taskList = new List<Task>();
                 foreach(Task task in tasks)
                 {
+                    if(null == task)
+                        continue;
+
                     if(!compareMD5(task))
+                    {
 				        taskList.Add(task);
+                    }
                 }
 				_onSuccess(taskList);
             }
@@ -110,7 +115,6 @@ namespace OMO.SDK.Updater
             string outfile = Path.Combine(outpath, filename)+".md5";
             if(!File.Exists(outfile))
                 return false;
-
             string md5 = File.ReadAllText(outfile);
             return md5.Equals(_task.md5);
         }
