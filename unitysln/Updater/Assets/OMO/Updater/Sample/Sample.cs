@@ -25,6 +25,8 @@ public class Sample : MonoBehaviour {
 	}
 	void onFetchSuccess(List<Task> _tasks)
 	{
+		foreach(Task task in _tasks)
+			Debug.Log(string.Format("{0} {1} {2} {3} {4}", task.uuid, task.path, task.file, task.md5, task.size));
 		updater.Upgrade(_tasks, onFinish, onError);
 	}
 
