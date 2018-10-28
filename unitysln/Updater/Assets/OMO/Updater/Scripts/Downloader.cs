@@ -2,9 +2,62 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Networking;
 
 namespace OMO.SDK.Updater
 {
+    public class FileDownloadHandler : DownloadHandlerScript
+    {
+        private int expected = -1;
+        private int received = 0;
+        private string filepath;
+        private FileStream fileStream;
+        private bool canceled = false;
+
+        public FileDownloadHandler(byte[] buffer, string filepath)
+          : base(buffer)
+        {
+            this.filepath = filepath;
+            fileStream = new FileStream(filepath, FileMode.Create, FileAccess.Write);
+        }
+
+        protected override byte[] GetData() { return null;}
+
+        protected override bool ReceiveData(byte[] data, int dataLength)
+        {
+            if (data == null || data.Length < 1)
+            {
+                return false;
+            }
+            received += dataLength;
+            if (!canceled) fileStream.Write(data, 0, dataLength);
+            return true;
+        }
+
+        protected override float GetProgress()
+        {
+            if (expected < 0) return 0;
+            return (float)received / expected;
+        }
+
+        protected override void CompleteContent()
+        {
+            fileStream.Close();
+        }
+
+        protected override void ReceiveContentLength(int contentLength)
+        {
+            expected = contentLength;
+        }
+
+        public void Cancel()
+        {
+            canceled = true;
+            fileStream.Close();
+            File.Delete(filepath);
+        }
+    }
+
     internal class Downloader
     {
         public delegate void OnStatusUpdateCallback(Status _status);
@@ -13,7 +66,7 @@ namespace OMO.SDK.Updater
 
         public OnStatusUpdateCallback onStatusUpdate;
 
-        private WWW www = null;
+        private UnityWebRequest webRequest = null;
         private Status status = new Status();
         private bool run = false;
         private Config config = null;
@@ -25,9 +78,9 @@ namespace OMO.SDK.Updater
         }
 
         public void InstallProcessor(Processor _processor)
-		{
-			processor = _processor;
-		}
+        {
+            processor = _processor;
+        }
 
         public void Download(List<Task> _tasks, OnFinishCallback _onFinish, OnErrorCallback _onError)
         {
@@ -38,7 +91,7 @@ namespace OMO.SDK.Updater
             config.mono.StartCoroutine(updateStatus());
 
             Queue<Task> tasks = new Queue<Task>(_tasks.Count);
-            foreach(Task task in _tasks)
+            foreach (Task task in _tasks)
                 tasks.Enqueue(task);
             config.mono.StartCoroutine(downloadQueue(tasks, _onFinish, _onError));
         }
@@ -47,43 +100,45 @@ namespace OMO.SDK.Updater
         {
             while (_task.Count > 0)
             {
+                yield return new WaitForEndOfFrame();
+
                 Task task = _task.Dequeue();
                 string uri = config.domain + "/upgrade" + task.path + task.file;
-                www = new WWW(uri);
-                yield return www;
-                if (www.error != null)
-                {
-                    //retry
-                    _task.Enqueue(task);
-                    _onError(www.error);
-                    continue;
-                }
-                byte[] data = www.bytes;
 
                 string filename = task.file;
-                if(null != processor)
+                if (null != processor)
                 {
-                    if(null != processor.Rename)
+                    if (null != processor.Rename)
                     {
                         filename = processor.Rename(task.file);
                     }
                 }
 
-                string outpath = Path.Combine(config.dir, task.path.Remove(0,1));
+                string outpath = Path.Combine(config.dir, task.path.Remove(0, 1));
                 Directory.CreateDirectory(outpath);
                 string outfile = Path.Combine(outpath, filename);
-                File.WriteAllBytes(outfile, data);
-                status.finish += 1;
-
-                System.Security.Cryptography.MD5 md5CSP = new System.Security.Cryptography.MD5CryptoServiceProvider();
-                byte[] retVal = md5CSP.ComputeHash(data);
-                System.Text.StringBuilder sb = new System.Text.StringBuilder();
-                for (int i = 0; i < retVal.Length; i++)
+                using (webRequest = new UnityWebRequest(uri))
                 {
-                    sb.Append(retVal[i].ToString("x2"));
+                    byte[] buffer = new byte[64 * 1024];
+                    webRequest.downloadHandler = new FileDownloadHandler(buffer, outfile);
+                    webRequest.SendWebRequest();
+                    while (!webRequest.isDone)
+                    {
+                        yield return new WaitForEndOfFrame();
+                    }
+
+                    if (!string.IsNullOrEmpty(webRequest.error))
+                    {
+                        //retry
+                        _task.Enqueue(task);
+                        _onError(webRequest.error);
+                        continue;
+                    }
+                    File.WriteAllText(Path.Combine(outpath, filename) + ".md5", task.md5);
                 }
-                string md5 = sb.ToString();
-                File.WriteAllText(Path.Combine(outpath, filename) + ".md5", md5);
+                webRequest = null;
+
+                status.finish += 1;
             }
             run = false;
             _onFinish();
@@ -93,7 +148,7 @@ namespace OMO.SDK.Updater
         {
             while (run)
             {
-                status.progress = (null != www) ? www.progress : 0;
+                status.progress = (null != webRequest) ? webRequest.downloadProgress : 0;
                 if (null != onStatusUpdate)
                     onStatusUpdate(status);
                 yield return new WaitForSeconds(0.1f);
